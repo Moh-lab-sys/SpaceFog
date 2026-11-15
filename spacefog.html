@@ -385,7 +385,8 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
       status: Object.fromEntries(CREW.map(c => [c.id, "ok"])),
       last: null, testMode: null,
       sleep: { lee: 7.0, haddad: 7.5, okafor: 5.8, moreau: 6.8 },  // demo values, h slept last night
-      worstZ: {}, rec: null
+      worstZ: {}, rec: null,
+      inbox: Object.fromEntries(CREW.map(c => [c.id, []]))  // task-change notices per crew member
     };
   }
   let baselines = {};
@@ -592,6 +593,20 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
     $("mStart").focus();
   }
   const cap = s => s ? s[0].toUpperCase() + s.slice(1) : "";
+  function notify(id, title, text) { S.inbox[id].push({ title, text, at: gmt() }); }
+  function showInbox() {
+    const items = S.inbox[S.me]; if (!items.length) return;
+    S.modal = true;
+    const box = $("riskBox");
+    box.className = "modal med";
+    box.innerHTML = `<span class="pill warn" style="align-self:flex-start;">Task change · ${items.length} new</span>
+      <h2 id="riskTitle">Your tasks have changed</h2>
+      ${items.map(n => `<div class="act"><div class="label">${n.at}</div><p><b>${n.title}</b> ${n.text}</p></div>`).join("")}
+      <button class="btn big" id="mAck">Got it</button>`;
+    $("riskModal").hidden = false;
+    $("mAck").addEventListener("click", () => { S.inbox[S.me] = []; closeModal(); renderMyTask(); renderCrew(); });
+    $("mAck").focus();
+  }
   function closeModal() { $("riskModal").hidden = true; S.modal = false; }
   function renderLast() {
     const r = S.last; if (!r) return;
@@ -686,7 +701,7 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
     if (home.owner === S.me) {
       card.className = "card mytask";
       card.innerHTML = `<div class="label">My task</div><div class="task-name">${home.name}</div>
-        <div class="meta"><span class="crit ${home.crit}">${home.crit} priority</span><span>Load ${TASK_LOAD[home.name].load}</span>${home.hold ? '<span class="pill bad"><span class="dot bad"></span>On hold · two-person verification</span>' : S.rec && S.rec.rec.decision === "safeguard" ? '<span class="pill warn"><span class="dot warn"></span>Proceed with safeguards</span>' : S.status[S.me] === "ok" ? '<span class="pill ok"><span class="dot ok"></span>Cleared</span>' : ""}</div>
+        <div class="meta"><span class="crit ${home.crit}">${home.crit} priority</span><span>Load ${fmt(TASK_LOAD[home.name].load, 1)}</span>${home.hold ? '<span class="pill bad"><span class="dot bad"></span>On hold · two-person verification</span>' : S.rec && S.rec.rec.decision === "safeguard" ? '<span class="pill warn"><span class="dot warn"></span>Proceed with safeguards</span>' : S.status[S.me] === "ok" ? '<span class="pill ok"><span class="dot ok"></span>Cleared</span>' : ""}</div>
         ${extra.length ? `<div class="meta">Also assigned: ${extra.map(t => `<span class="chip new">${t.name}</span>`).join(" ")}</div>` : ""}`;
     } else {
       card.className = "card mytask moved";
@@ -718,7 +733,7 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
     $("whoChip").hidden = false; $("whoChip").innerHTML = `${avatar(me, "sm")}<span>${fullName(me)}</span>`;
     $("gear").hidden = false;
     $("slp").value = S.sleep[S.me]; $("slpV").textContent = fmt(S.sleep[S.me], 1);
-    S.countdown = S.T; goDash();
+    S.countdown = S.T; goDash(); showInbox();
   });
 
   // ---------- settings ----------
@@ -741,7 +756,9 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
   $("predictNow").addEventListener("click", () => { $("settings").hidden = true; if (S.screen !== "dash") goDash(); S.countdown = S.T; renderCountdown(); runPrediction(); });
   $("recBase").addEventListener("click", () => startTests("baseline"));
   $("signOut").addEventListener("click", () => {
-    clearAll(); clearInterval(autoTimer); closeModal(); S = fresh();
+    clearAll(); clearInterval(autoTimer); closeModal();
+    const keep = { tasks: S.tasks, status: S.status, sleep: S.sleep, worstZ: S.worstZ, inbox: S.inbox };
+    S = fresh(); Object.assign(S, keep);
     $("whoChip").hidden = true; $("gear").hidden = true; show("signin");
   });
 
@@ -947,12 +964,15 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
         <div class="person">${avatar(me, "lg")}<span>${fullName(me)}</span><span class="pill bad">${STATUS_TXT[risk.status]}</span></div>
         <div class="lane"><div class="moving" id="movingChip">${home.name}</div></div>
         <div class="person">${avatar(to, "lg")}<span>${fullName(to)}</span><span class="pill ok">Risk ${fmt(cands[0].r.total, 2)}</span></div></div>
-        <p class="big-line">${home.name} moved to ${fullName(to)}</p>`;
+        <p class="big-line">${home.name} moved to ${fullName(to)}</p>
+        <p style="color:var(--ink-soft);">${fullName(to)} has been notified.</p>`;
+      notify(to.id, `${home.name} (load ${fmt(TASK_LOAD[home.name].load, 1)}) is now assigned to you.`, `${fullName(me)} was flagged at high cognitive risk after a cognitive check. This is in addition to your own task, pending Commander review. It returns to ${me.name} once their next check is normal.`);
     } else if (rec.decision === "reassign" || (risk.status === "High" && home.owner !== S.me)) {
       move = `<p class="big-line">${home.name} stays with ${fullName(crewById(home.owner))}</p>`;
     } else {
       if (rec.decision === "hold") home.hold = true;
-      if (home.owner !== S.me) { const from = crewById(home.owner); home.owner = S.me; home.at = null; move = `<p class="big-line">${home.name} returned to you from ${fullName(from)}</p>`; }
+      if (home.owner !== S.me) { const from = crewById(home.owner); home.owner = S.me; home.at = null; move = `<p class="big-line">${home.name} returned to you from ${fullName(from)}</p><p style="color:var(--ink-soft);">${fullName(from)} has been notified.</p>`;
+        notify(from.id, `${home.name} is no longer assigned to you.`, `${fullName(me)} passed their cognitive check and has taken the task back.`); }
       move = `<div class="keep">${avatar(me, "lg")}<div><div class="label">Your task</div><div class="tname">${home.name}</div></div></div>` + move;
     }
     const bad = low.length > 0;
