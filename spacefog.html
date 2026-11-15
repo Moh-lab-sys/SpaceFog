@@ -341,7 +341,8 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
     <input type="range" id="slp" min="3" max="10" step="0.5" value="7" aria-label="Hours slept last night"></div>
   <div class="row"><button class="btn ghost" id="predictNow">Run prediction now</button></div>
   <div class="row"><button class="linkbtn" id="recBase" style="align-self:flex-start;">Record my baseline</button>
-    <button class="linkbtn" id="signOut" style="align-self:flex-start;">Sign out</button></div>
+    <button class="linkbtn" id="signOut" style="align-self:flex-start;">Sign out</button>
+    <button class="linkbtn" id="resetCrew" style="align-self:flex-start;">Reset crew to original tasks</button></div>
 </div>
 
 <script>
@@ -391,6 +392,17 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
   }
   let baselines = {};
   try { baselines = JSON.parse(localStorage.getItem("spacefog-baselines") || "{}") || {}; } catch (e) { baselines = {}; }
+  // Crew state (task owners, flags, sleep, notices) is saved in this browser so a switch survives sign-out and reload.
+  const CREW_KEY = "spacefog-crew-state";
+  const crewState = () => ({ tasks: S.tasks, status: S.status, sleep: S.sleep, worstZ: S.worstZ, inbox: S.inbox });
+  function saveCrew() { try { localStorage.setItem(CREW_KEY, JSON.stringify(crewState())); } catch (e) {} }
+  function loadCrew() {
+    try {
+      const d = JSON.parse(localStorage.getItem(CREW_KEY) || "null");
+      if (d && Array.isArray(d.tasks) && d.tasks.length === CREW.length) Object.assign(S, d);
+    } catch (e) {}
+  }
+  loadCrew();
   function saveB() { try { localStorage.setItem("spacefog-baselines", JSON.stringify(baselines)); } catch (e) {} }
 
   const $ = id => document.getElementById(id);
@@ -604,7 +616,7 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
       ${items.map(n => `<div class="act"><div class="label">${n.at}</div><p><b>${n.title}</b> ${n.text}</p></div>`).join("")}
       <button class="btn big" id="mAck">Got it</button>`;
     $("riskModal").hidden = false;
-    $("mAck").addEventListener("click", () => { S.inbox[S.me] = []; closeModal(); renderMyTask(); renderCrew(); });
+    $("mAck").addEventListener("click", () => { S.inbox[S.me] = []; saveCrew(); closeModal(); renderMyTask(); renderCrew(); });
     $("mAck").focus();
   }
   function closeModal() { $("riskModal").hidden = true; S.modal = false; }
@@ -750,14 +762,18 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
     [...$("segCabin").children].forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   });
   $("slp").addEventListener("input", e => {
-    if (!S.me) return; S.sleep[S.me] = +e.target.value; $("slpV").textContent = fmt(S.sleep[S.me], 1);
+    if (!S.me) return; S.sleep[S.me] = +e.target.value; saveCrew(); $("slpV").textContent = fmt(S.sleep[S.me], 1);
     if (S.screen === "dash") renderCrew();
   });
   $("predictNow").addEventListener("click", () => { $("settings").hidden = true; if (S.screen !== "dash") goDash(); S.countdown = S.T; renderCountdown(); runPrediction(); });
   $("recBase").addEventListener("click", () => startTests("baseline"));
+  $("resetCrew").addEventListener("click", () => {
+    const fr = fresh(); Object.assign(S, { tasks: fr.tasks, status: fr.status, sleep: fr.sleep, worstZ: fr.worstZ, inbox: fr.inbox, rec: null });
+    saveCrew(); $("settings").hidden = true; if (S.screen === "dash") goDash();
+  });
   $("signOut").addEventListener("click", () => {
     clearAll(); clearInterval(autoTimer); closeModal();
-    const keep = { tasks: S.tasks, status: S.status, sleep: S.sleep, worstZ: S.worstZ, inbox: S.inbox };
+    const keep = crewState(); saveCrew();
     S = fresh(); Object.assign(S, keep);
     $("whoChip").hidden = true; $("gear").hidden = true; show("signin");
   });
@@ -983,6 +999,7 @@ footer.foot { font-size: 13px; color: var(--ink-soft); margin-top: auto; }
       <div class="actions"><button class="btn big" id="toDash">Back to dashboard</button></div>`;
     const chip = $("movingChip");
     if (chip) requestAnimationFrame(() => requestAnimationFrame(() => chip.classList.add("go")));
+    saveCrew();
     $("toDash").addEventListener("click", () => { S.countdown = S.T; goDash(); });
     $("toDash").focus();
   }
